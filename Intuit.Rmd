@@ -1,0 +1,237 @@
+---
+title: "Intuit"
+output: pdf_document
+---
+#Libraries
+```{r}
+library(tidyverse)
+library(fastDummies) 
+library(neuralnet)
+library(ggplot2)
+library(MLmetrics) # AUC and MSE
+library(plotROC) # ggplot for ROC/Gains
+library(ROCit) # gain / lift table
+library(margins)
+library(statar)
+library(gmodels)
+
+intuit <- read.csv("intuit_posted_2020.csv")
+head(intuit)
+names(intuit)
+```
+#Logistic Model
+```{r}
+attach(intuit)
+train <- intuit[training==1,]
+test <- intuit[training==0,]
+logit_model <- glm(res1~sex+bizflag+speeddown+speedup04_11+speedup_above11+
+                     upgraded+numords+dollars+last+version2013+payroll+medhvalue+income+state,
+                   data=train,family = "binomial")
+
+logit_sum <- summary(logit_model)
+logit_margins <- margins(logit_model)
+logit_margins
+#We can see the important vars:
+# speedup_above11 
+```
+```{r}
+logit_prob <- predict.glm(logit_model,newdata = test, type = "response")
+AUC(logit_prob,test$res1) #0.8244(Too low)
+
+target_wave2 <- logit_prob/2>=0.2
+
+id2 <- c(1:22500)
+group <- c("Sean_Jifan_Ruining_Vincent_Yaohong")
+section <- c("02")
+group <-cbind(id,target_wave2,group,section)
+
+view(group)
+
+write.csv(group,file="Sean_Jifan_Ruining_Vincent_Yaohong.csv")
+
+group <-cbind(id2,group)
+group
+id2 <- id2 %>%
+  mutate(group="Sean_Jifan_Ruining_Vincent_Yaohong")
+#Define ROI as (Revenue-Cost)/Cost
+#The core of the offer was a 6-month 33% discount on the subscription fee.
+#profit $234 net benefit of $180 
+#Out of the 75,000 targeted customers, 2,925 converted to Quickbooks Online, 
+#yielding an estimated profit of $256,500 and a marketing ROI of 95%.
+
+```
+#RFM Model
+```{r}
+# Recency : last Frequency: numords Monetary: dollars
+#Now we do quintiles
+in2 <- intuit%>%
+  mutate(rec_q = xtile(last,5),
+         fre_q = xtile(numords,5), 
+         mon_q=xtile(dollars,5))
+attach(in2)
+in2 %>% group_by(rec_q)%>%summarise(avg_rec=mean(last))#rise
+in2 %>% group_by(fre_q)%>%summarise(avg_rec=mean(numords)) #rise
+in2 %>% group_by(mon_q)%>%summarise(avg_rec=mean(dollars)) #rise
+#Now we mutate the frequency and monetary
+in2$fre_q <- max(in2$fre_q)+1-in2$fre_q
+in2$mon_q <- max(in2$mon_q)+1-in2$mon_q
+#Now we create bar plot to see these 3 paras 
+avg_rec <- in2 %>% group_by(rec_q) %>%
+  summarise(avg_response_rec = mean(res1))
+avg_fre <- in2 %>% group_by(fre_q) %>%
+  summarise(avg_response_fre = mean(res1))
+avg_mon <- in2 %>% group_by(mon_q) %>%
+  summarise(avg_response_mon = mean(res1))
+avg_rec
+ggplot(data=avg_rec,aes(x=rec_q,y=avg_response_rec))+
+  geom_bar(stat = "identity",width = 0.5)
+ggplot(data=avg_fre,aes(x=fre_q,y=avg_response_fre))+
+  geom_bar(stat = "identity",width = 0.5)
+ggplot(data=avg_mon,aes(x=mon_q,y=avg_response_mon))+
+  geom_bar(stat = "identity",width = 0.5)
+```
+#Claculation Part About RFM
+```{r}
+#create a rfm group
+attach(in2)
+in2$rfm = rec_q*100+fre_q*10+mon_q
+rfm_response <- in2%>%group_by(rfm)%>%
+  summarise(avg_response=mean(res1))
+ggplot(data=rfm_response,aes(x=rfm,y=avg_response))+
+  geom_bar(stat = "identity",width=0.3)
+#breakeven rate 2%
+#So the response rate should be more than 4%
+in2 <- in2%>%
+  group_by(rfm)%>%
+  mutate(avg_response=mean(res1))
+in2
+in2 <- in2 %>%
+  mutate(target_TF = avg_response>0.04)
+#Compute the ROI
+attach(in2)
+CrossTable(res1,target_TF)
+#Cost = 25767 * 3.6 = 92761.2
+#Profit = 1705*180 = 306900
+#ROI = (306900-92761.2)/92761.2 = 2.30
+```
+#Neural Network pre Processing
+```{r}
+in_nn <- intuit
+
+#Firstly dummy those vars
+#sex and state 
+#Now we scale seperately 
+
+in_nn<-
+  dummy_cols(in_nn, select_columns = c("sex", "state"),
+remove_first_dummy = TRUE)
+#Now we drop the column sex, state
+in_nn <- in_nn%>%select(-c("sex","state"))
+
+in_nn
+
+nn_train <- in_nn[which(training==1),]
+nn_test <- in_nn[which(training==0),]
+
+
+mins<-apply(nn_train,2,min)
+maxs<-apply(nn_train,2,max)
+
+nn_train <- 
+  data.frame(scale(nn_train,center = mins,scale = maxs-mins))
+
+mins<-apply(nn_test,2,min)
+maxs<-apply(nn_test,2,max)
+nn_test <- 
+  data.frame(scale(nn_test,center = mins,scale = maxs-mins))
+```
+#Apply for Neural Network
+```{r}
+#Train the model
+set.seed(1997)
+
+nn <- neuralnet(res1~bizflag+speeddown+speedup04_11+speedup_above11+upgraded+numords+dollars+last,version2013+payroll+medhvalue+income,hidden=5,data = nn_train,linear.output = FALSE)
+
+nn.predict <- predict(nn,newdata=nn_test)
+AUC(nn.predict,nn_test$res1)
+
+#We try different hidden layers and get the AUC
+# 1 hidden : 0.46
+# 2 hidden : 0.73
+# 3 hidden : 0.74
+# 4 hidden : 0.74 ... 
+# So the result here is pretty poor.
+```
+#SVM model 
+```{r}
+library(e1071)
+
+
+svm.linear <- svm(res1~.-id-training,kernel="linear",data=train,cost=0.005)
+svm.linear.predict <- predict(svm.linear,test)
+AUC(svm.linear.predict,test$res1) 
+# Cost 0.01 0.69
+# Cost 0.005 0.65
+
+
+svm.radial <- svm(res1~.-id-training,kernel="radial",data=train,cost=0.1)
+svm.radial.predict <- predict(svm.radial,test)
+AUC(svm.linear.predict,test$res1) 
+
+#Both not good. Lets try poly 
+#Cost 0.1 0.65
+# Cost 0.01 0.65
+# Cost 0.005 0.65
+
+
+svm.poly = svm(res1~.-id-training,kernel="poly",
+               data=train,degree=2,cost=0.1)
+svm.poly.predict <- predict(svm.poly,test)
+AUC(svm.poly.predict,test$res1)
+
+#0.0005 0.66
+#0.001 0.67
+#0.01 0.64
+#0.05 0.69
+#0.1 0.69
+
+#Lets try degree = 3 
+svm.poly = svm(res1~.-id-training,kernel="poly",
+               data=train,degree=3,cost=0.05)
+svm.poly.predict <- predict(svm.poly,test)
+AUC(svm.poly.predict,test$res1)
+# 0.65 not good. 
+
+#With cost increases, shows a pattern of decrease.
+#Is this because of overfitting? Lets see.
+svm.poly.train.predict <- predict(svm.poly,train)
+AUC(svm.poly.train.predict,train$res1)
+#The train is 73%, also not good. So model does not fit well.
+```
+#Decision Tree
+```{r}
+library(tree)
+tree.model <- tree(res1~.-id-training-state,data = train,)
+summary(tree.model)
+tree.predict <- predict(tree.model,test)
+AUC(tree.predict,test$res1)
+#AUC here is 0.65
+```
+#Random Forest
+```{r}
+library(randomForest)
+forest.model <- randomForest(res1~.-id-training,data=train,mtry=3,ntree=500)
+forest.predict <- predict(forest.model,test)
+AUC(forest.predict,test$res1)
+#We have 0.80 AUC here, which is pretty high.
+#Now we try to tune the paras for randomForest
+#Run into problem -> GPU does not support 
+#I seperately tryed different paras and the AUCs are similar
+```
+#Deternimation
+```{r}
+#At last we use logit model as our model and export the data into the csv file
+
+```
+
+
