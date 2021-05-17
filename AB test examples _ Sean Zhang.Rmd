@@ -1,0 +1,391 @@
+---
+title: "A/B testing Examples"
+author: "Zhang Zixuan"
+date: "2/11/2020"
+output: pdf_document
+---
+# a 
+```{r}
+a <- read.csv("auction.csv")
+attach(a)
+auction1_mean <- mean(a[a$uniform_price_auction ==1,"bid"])
+auction0_mean <- mean(a[a$uniform_price_auction ==0,"bid"])
+ate <- auction1_mean - auction0_mean
+ate
+```
+
+#b
+```{r}
+compute_ate_random <- function(){
+  fake.treatment <- sample(uniform_price_auction)
+  treat_fake <- mean(a[which(fake.treatment==1),"bid"])
+  control_fake <- mean(a[which(fake.treatment==0),"bid"])
+  return(treat_fake-control_fake)
+}
+random_fake_results <- replicate(10000,compute_ate_random())
+hist(random_fake_results,breaks=100)
+abline(v=ate,col="red",lwd=3)
+```
+#c
+```{r}
+#calculate the p value
+mean(random_fake_results <= ate) # The p value is 0.0032
+```
+#d
+```{r}
+#The probability that auction format has no effect 
+#on anyone’s bids(null hypothesis) is 0.0032.
+```
+#e
+```{r}
+treat_outcome = a$bid[a$uniform_price_auction==1]
+control_outcome = a$bid[a$uniform_price_auction==0]
+t.test(treat_outcome,control_outcome)
+# 95% confidence interval : [-20.854624 ,-3.557141]
+```
+#f
+```{r}
+# we have 95% confidence saying that multi-unit format will
+# cause a 3.557141 ~ 20.854624 decrease in bid compared to 
+# the Vickrey format. If we compute the interval multiple times, 
+# The true ATE will be included.
+```
+
+```{r}
+social <- read.csv("social_pressure_cleaned.csv")
+wfh <- read.csv("wfh_cleaned.csv")
+
+View(social)
+View(wfh)
+```
+
+
+```{r}
+attach(wfh)
+print(summary(lm(perform_during~wfh$wfh)))
+print(summary(lm(perform_during~wfh$wfh+perform_before)))
+ci <- function(ate, se) return(c(ate + 1.96 * se, ate - 1.96 * se))
+```
+```{r}
+before_after_difference <- perform_during-perform_before
+summary(lm(before_after_difference~wfh$wfh))
+```
+```{r warning=TRUE}
+#Randomnization Check
+summary(lm(wfh$perform_before~wfh$wfh))
+```
+```{r}
+detach(wfh)
+attach(social)
+head(social)
+```
+```{r}
+mean(social$voted[treatment_hawthorne==1])-mean(social$voted[treatment_hawthorne==0]) 
+mean(social$voted[treatment_civicduty==1])-mean(social$voted[treatment_civicduty==0]) 
+mean(social$voted[treatment_neighbors==1])-mean(social$voted[treatment_neighbors==0]) 
+mean(social$voted[treatment_self==1])-mean(social$voted[treatment_self==0]) 
+
+
+```
+
+```{r}
+library(sandwich)
+library(lmtest)
+linear_model <- lm(voted~treatment_civicduty+treatment_hawthorne+treatment_neighbors+treatment_self)
+summary(linear_model)
+#Cluster the standard error
+cl <- function(fm, cluster){
+  require(sandwich, quietly = TRUE)
+  require(lmtest, quietly = TRUE)
+  M <- length(unique(cluster))
+  N <- length(cluster)
+  K <- fm$rank
+  dfc <- (M/(M-1))*((N-1)/(N-K))
+  uj  <- apply(estfun(fm),2, function(x) tapply(x, cluster, sum));
+  vcovCL <- dfc*sandwich(fm, meat=crossprod(uj)/N)
+  coeftest(fm, vcovCL) 
+}
+  # To use CL; first specify your model, like this:
+
+  lm.result <- lm(y~x, data) 
+
+cl(linear_model, household_id)
+```
+```{r}
+names(social)
+options("scipen"=999)
+linear_model2 <- lm(voted~treatment_civicduty+treatment_hawthorne+treatment_neighbors+treatment_self+female+yob+g2000+g2002+p2000+p2002+p2004)
+summary(linear_model2)
+```
+
+```{r}
+summary(lm(turnout ~ treatment, data=data))
+#The ITT here is 0.13208
+```
+# Question d 
+```{r}
+options("scipen"=999)
+library(sandwich)
+library(lmtest)
+cl <- function(fm,cluster){
+  M <- length(unique(cluster))
+  N <- length(cluster)
+  K <- fm$rank
+  dfc <-(M/(M-1))*((N-1)/(N-K))
+  uj <- apply(estfun(fm),2,function(x) tapply(x,cluster,sum));
+  vcovCL <- dfc*sandwich(fm,meat=crossprod(uj)/N)
+  coeftest(fm,vcovCL)
+}
+lm_cluster <- lm(turnout ~ treatment,data)
+cl(lm_cluster,data$dormid)
+```
+# Question e 
+```{r}
+#alpha: share of treatment subjects treated.
+alpha <- mean(data$contact[data$treatment==1])
+ITT <-  0.13208
+CACE <- ITT/alpha
+CACE
+#The CACE here is 0.1490958
+```
+# Question f 
+1. The true CACE effect: The conversation truly make students more likely to vote.
+2. The effect of leaving the leaflet on compliers: students were more likely to vote after they receive the treatment.
+3. The effect of leaving the leaflet on never-takers: students are more likely to vote when they see the leaflet after going back the dorms.
+4.Alpha: it can affect the magnitude of ITT. E.g. If $\tau + l_c > l_n$, bigger $\alpha$ will leads to larger ITT 
+
+#Question g
+We have:
+$ITT = \alpha * (\tau + l_c) + (1-\alpha)*l_n$
+which is 
+$0.13208 = 0.8858736 *(\tau + 0.01)+(1-0.8858736)*0.01$
+$\tau = 0.137807 $
+
+#Question h
+$ITT = \alpha * (\tau + l_c) + (1-\alpha)*l_n$
+which is 
+$0.13208 = 0.8858736 *(\tau + 0)+(1-0.8858736)*0.03$
+$\tau = 0.145231 $
+
+
+```{r}
+dis_table <- table(total_ad_exposures_week1,treatment_ad_exposures_week1)
+dis_table
+plot(dis_table[7,])
+```
+
+```{r}
+summary(lm(week0~treatment_ad_exposures_week1))
+```
+
+```{r}
+library(lfe)
+summary(felm(week0~treatment_ad_exposures_week1|total_ad_exposures_week1))
+```
+
+```{r}
+summary(felm(week1~treatment_ad_exposures_week1|total_ad_exposures_week1))
+```
+
+```{r}
+week_after <- rowSums(data[,5:13])
+data <- cbind(data,week_after)
+summary(felm(week_after~treatment_ad_exposures_week1|total_ad_exposures_week1))
+
+```{r}
+data$ajusted_treatment = treatment_ad_exposures_week1*0.7 + 
+  (total_ad_exposures_week1-treatment_ad_exposures_week1)*0.1
+summary(felm(week1~ajusted_treatment|total_ad_exposures_week1,data))
+
+```{r}
+data = read.table("/Users/zhangzixuan/Desktop/COURSES/A:B testing/Module 2/Lab/certification.txt",header = TRUE)
+summary(data)
+str(data)
+attach(data)
+corrplot(cor(data))
+round(cor(data),2)
+a<- as.data.frame(table(certified,transaction_month))
+
+data
+#Influence of certification on price
+summary(lm(price~certified)) #-1.5935
+#Influence of all vars on price
+summary(lm(price~.,data = data)) #-1.3615
+#Influence of shipping fee on price
+
+#Because of shipping fee?
+price_include_ship = price+shipping_fee
+summary(lm(price_include_ship~certified)) #-2.97
+
+view(data)
+
+#Because of Product Code?
+unique(product_code)
+aggregate(cbind(price,certified)~product_code,data=data,mean)
+
+#Get the normalized price for each product category
+colnames(prod)=
+data <- merge(data,prod,by=product_code)
+data$rela_price = price/product_value
+hist(relative_price)
+
+##### Part I
+#### European Countries Treament
+
+```{r}
+bc <- read.csv("bertrand_clean.csv")
+mt <- read.csv("machine_translation.csv")
+str(bc)
+str(mt)
+``` 
+
+
+```{r}
+summary(mt)
+table(mt$exports_european)
+table(mt$exports_asian)
+table(mt$treatment)
+```
+```{r}
+attach(mt)
+treat.european <- mean(mt[which(treatment==1),"exports_european"])
+#mean(exports_european[treatment==1])
+control.european <- mean(mt[which(treatment==0),"exports_european"])
+ate.european = treat.european - control.european # 0.1314
+ate.european
+#We get 0.1314 more standard deviations. 
+```
+```{r}
+compute_ate_random <- function(){
+  fake.treatment <- sample(treatment)
+  treat.european <- mean(mt[which(fake.treatment==1),"exports_european"])
+  #mean(exports_european[treatment==1])
+  control.european <- mean(mt[which(fake.treatment==0),"exports_european"])
+  return(treat.european - control.european)
+}
+
+compute_ate_random()
+random_fake_results <- replicate(10000,compute_ate_random()) # it is a numeric list
+mean(random_fake_results) # the mean is even -0.00029 
+```
+```{r}
+#Question 5
+hist(random_fake_results,breaks=100)
+abline(v=ate.european,col="red",lwd=3)
+whether_randomness <- ifelse(random_fake_results>=ate.european,T,F)
+mean(whether_randomness) #So the p value is 0.001
+
+#use the canned function from r with t test
+t.test(mt$exports_european~mt$treatment) # Explain both tail. 
+help(t.test)
+```
+```{r}
+#Question 6
+std_error <-sd(random_fake_results) #0.0432864
+ate.european-1.96*std_error
+ate.european+1.96*std_error
+#0.04---0.21
+
+summary(lm(exports_european~treatment,data=mt))
+```
+
+
+
+
+#### What about asain countries
+
+```{r}
+mt
+treat.asian <- mean(mt[which(treatment==1),"exports_asian"])
+#mean(exports_asian[treatment==1])
+control.asian <- mean(mt[which(treatment==0),"exports_asian"])
+ate.asian = treat.asian - control.asian # 0.1314
+ate.asian
+#We get -0.00367 more standard deviations. 
+```
+```{r}
+
+compute_ate_random <- function(){
+  fake.treatment <- sample(treatment)
+  treat.asian <- mean(mt[which(fake.treatment==1),"exports_asian"])
+  #mean(exports_asian[treatment==1])
+  control.asian <- mean(mt[which(fake.treatment==0),"exports_asian"])
+  return(treat.asian - control.asian)
+}
+
+random_fake_results <- replicate(10000,compute_ate_random()) # it is a numeric list
+mean(random_fake_results) # the mean is 0.0006405672
+```
+```{r}
+#Question 5
+hist(random_fake_results,breaks=100)
+abline(v=ate.asian,col="red",lwd=3)
+whether_randomness <- ifelse(random_fake_results>=ate.asian,T,F)
+mean(whether_randomness) #So the p value is 0.5612, which is not significant
+
+#use the canned function from r with t test
+t.test(mt$exports_asian~mt$treatment) # Explain both tail. 3p-value = 0.929
+help(t.test)
+```
+```{r}
+#Question 6
+std_error_asian <-sd(random_fake_results) #0.0432864
+ate.asian-1.96*std_error_asian
+ate.asian+1.96*std_error_asian
+#0.08595145 -> 0.07859851
+
+summary(lm(exports_asian~treatment,data=mt))
+```
+
+```{r}
+entire.data <- read.csv("/Users/zixuanzhang/Desktop/COURSES/A:B testing/Modules/Module 9/Lab 9/Lab 9 data/lalive_clean.csv")
+lalive.subset <- subset(entire.data,  entire.data$region_treated== 1 & entire.data$policy_active == 1)
+head(lalive.subset)
+```
+```{r}
+# 3.	With this new data, let’s compute the effect of being just over 50 on unemployment duration “by hand.” 
+#Compute the mean unemployment duration for individuals who are older than 49 but less than 50. 
+#Compute a second mean of the unemployment duration for individuals who are 50 or older but younger than 51. 
+#What’s the difference in these means?
+attach(lalive.subset)
+mean_49 <- mean(lalive.subset[age_minus_50<0 & age_minus_50>-1,"unemp_duration"])
+mean_50 <- mean(lalive.subset[age_minus_50>0 & age_minus_50<1,"unemp_duration"])
+ATE_1 <-mean_50-mean_49
+ATE_1
+```
+```{r}
+# 4.	Let’s test the statistical significance of the differences between these means by running a regression of 
+# unemployment duration on an indicator for whether someone is over 50, but only in a “1 year window” around 50 
+# -- that is, among those who are older than 49 but younger than 51 years old. 
+# To do this, run a regression like follows:
+# summary(lm(y ~ x, lalive.subset, age_minus_50 > -1 & age_minus_50 < 1))
+# How do we interpret these coefficients? 
+
+summary(lm(unemp_duration ~ over50, lalive.subset, age_minus_50 > -1 & age_minus_50 < 1))
+```
+```{r}
+scatter.smooth(age_minus_50,unemp_duration)
+summary(lm(unemp_duration ~ over50+age_minus_50+age_minus_50_X_over50, lalive.subset))
+#How to interpret this?
+```
+```{r}
+#Creates a dataset for people over 50 and a dataset people under 50
+#Doing this allows us to compute the regression lines on either side of the cutoff
+lalive.subset.under50 <- subset(lalive.subset, over50 == 0) #lalive.subset should be what you made in Step 2 above
+lalive.subset.over50 <- subset(lalive.subset, over50 == 1)
+#Runs regressions with the effect of age on unemp_duration on both sides of the cutoff
+#Uses the predict() command to produce the model's guesses of unemp_duration
+reg0 <- lm(unemp_duration ~ age_minus_50, lalive.subset.under50)
+fit0 <- predict(reg0)
+reg1 <- lm(unemp_duration ~ age_minus_50, lalive.subset.over50)
+fit1 <- predict(reg1)
+
+#Plots the dots
+plot(lalive.subset$age_minus_50, lalive.subset$unemp_duration, col="gray60", ylim=c(0,150))
+#Places a vertical line at the cutoff (in this case is 0)
+abline(v=0, col="black", lty=2, lwd=2)
+
+#Draws two lines showing the predicted values: one for each predicted line on either side of the cutoff
+lines(lalive.subset.under50$age_minus_50, fit0, col="red", lwd=3, lend=2)
+lines(lalive.subset.over50$age_minus_50, fit1, col="red", lwd=3, lend=2)
+
